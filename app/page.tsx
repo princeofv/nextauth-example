@@ -6,7 +6,7 @@ import { useEffect } from "react";
 export default function DashboardPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
-
+console.log('session', session)
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/login");
