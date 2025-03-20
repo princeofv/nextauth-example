@@ -1,30 +1,57 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import NextAuth from "next-auth/next";
 import GoogleProvider from "next-auth/providers/google";
-// import type { NextAuthOptions } from "next-auth";
+import CredentialsProvider from "next-auth/providers/credentials";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { auth } from "@/lib/firebase";
 
 export const authOptions: any = {
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      // authorization: {
-      //   params: {
-      //     scope: "openid email profile https://www.googleapis.com/auth/calendar",
-      //   },
-      // },
+    }),
+    CredentialsProvider({
+      name: "Email",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" },
+      },
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials?.password) return null;
+        try {
+          const userCredential = await signInWithEmailAndPassword(auth, credentials.email, credentials.password);
+          // console.log('userCredential', userCredential)
+          const user = userCredential.user;
+          // console.log('user', user)
+          const token = await user.getIdToken(true);
+
+          return {
+            id: user.uid,
+            name: user.displayName || credentials.email,
+            email: user.email,
+            accessToken: token,
+          };
+        } catch (error) {
+          console.error("Error signing in:", error);
+          return null;
+        }
+      },
     }),
   ],
+
   secret: process.env.NEXTAUTH_SECRET,
   pages: {
     signIn: "/login",
   },
+
   callbacks: {
-    async jwt({ token, account }:any) {
+    async jwt({ token, account }: any) {
       if (account) {
-        token.accessToken = account.access_token; // Store the access token
-        token.provider = account.provider; // Store the provider (e.g., "google")
-      console.log('token', token)
+        token.accessToken = account.access_token;
+        token.provider = account.provider;
+        console.log("token", token, account);
+
         try {
           const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/user/my-account`, {
             method: "GET",
@@ -32,12 +59,13 @@ export const authOptions: any = {
               Authorization: `Bearer ${account.access_token}`,
             },
           });
-          console.log('response get my account', response)
+
+
           if (response.ok) {
             const userData = await response.json();
-            token.user = userData; 
+            token.user = userData;
           } else if (response.status === 401 || response.status === 403) {
-            console.log('account.access_token', account.access_token)
+            console.log("account.access_token", account.access_token);
             const createUserResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/user/register`, {
               method: "POST",
               headers: {
@@ -51,29 +79,37 @@ export const authOptions: any = {
 
             if (createUserResponse.ok) {
               const newUserData = await createUserResponse.json();
-              token.user = newUserData; 
+              token.user = newUserData;
             } else {
               console.error("Failed to create user:", createUserResponse.status);
-              token.error = "Failed to create user"; 
+              token.error = "Failed to create user";
             }
           } else {
             console.error("Failed to fetch user data:", response.status);
-            token.error = "Failed to fetch user data"; // Store error in the JWT
+            token.error = "Failed to fetch user data";
           }
         } catch (error) {
           console.error("Error in JWT callback:", error);
-          token.error = "Internal server error"; // Store error in the JWT
+          token.error = "Internal server error";
         }
       }
-      return token; // Return the updated token
+      return token;
     },
 
-    // Session Callback: Pass JWT data to the session
-    async session({ session, token }:any) {
-      session.accessToken = token.accessToken; // Add access token to the session
-      session.user = token.user; // Add user data to the session
-      session.error = token.error; // Add error to the session
-      return session; // Return the updated session
+    async session({ session, token }: any) {
+      session.accessToken = token.accessToken;
+      session.user = token.user;
+      session.error = token.error;
+      return session;
+    },
+
+    async redirect({ url, baseUrl }: any) {
+      return url.startsWith(baseUrl) ? url : baseUrl;
+    },
+
+    async signIn({ user }: any) {
+      if (!user.email) return false;
+      return true;
     },
   },
 };
